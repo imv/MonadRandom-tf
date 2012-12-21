@@ -2,6 +2,7 @@ MonadRandom-monads-tf library.
 Copyright 2006-2007 Cale Gibbard.  All rights reserved.
 Copyright 2006 Russell O'Connor, Dan Doel, Remi Turk.  All rights reserved.
 Copyright 2007 Eric Kidd.  All rights reserved.
+Copyright 2012 Michael Ivko.  All rights reserved.
 
 [This code was originally posted by Cale Gibbard to the Haskell Wiki,
 remnants of which can be seen at:

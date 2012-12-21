@@ -1,13 +1,10 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FlexibleInstances, UndecidableInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# OPTIONS -fno-warn-orphans #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- |
-Copyright    : 2006-2007 Cale Gibbard, Russell O'Connor, Dan Doel, Remi Turk, Eric Kidd.
+Copyright    : 2006-2012 Cale Gibbard, Russell O'Connor, Dan Doel, Remi Turk, Eric Kidd, Michael Ivko.
 License      : OtherLicense
 Stability    : experimental
-Portability  : non-portable (multi-parameter type classes, undecidable instances)
+Portability  : non-portable (type families)
 
 A random number generation monad.  See
 <http://www.haskell.org/haskellwiki/NewMonads/MonadRandom> for the original
@@ -41,27 +38,44 @@ module Control.Monad.Random (
     ) where
 
 import System.Random
-import Control.Monad()
 import Control.Monad.Error
 import Control.Monad.Identity
 import Control.Monad.Random.Class
 import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad.Trans()
+import Control.Monad.Trans
+import Control.Monad.Fix
 import Control.Monad.Writer
 import Control.Arrow
 import Control.Applicative
 
 -- | A monad transformer which adds a random number generator to an
 -- existing monad.
-newtype RandT g m a = RandT (StateT g m a)
-    deriving (Functor, Monad, MonadTrans, MonadIO, MonadFix)
+newtype RandT g m a = RandT{
+    unRandT :: StateT g m a
+}
+
+-- Handwirtten instances, because apparently type fammilies don't go well with
+-- GeneralizedNewtypeDeriving.
+instance Functor m => Functor (RandT g m) where
+    fmap f = RandT . fmap f . unRandT
+instance Monad m => Monad (RandT g m) where
+    (>>=) ma f = RandT $ unRandT ma >>= unRandT . f
+    (>>) ma mb = RandT $ unRandT ma >> unRandT mb
+    return = RandT . return
+    fail = RandT . fail
+instance MonadTrans (RandT g) where
+    lift = RandT . lift
+instance MonadIO m => MonadIO (RandT g m) where
+    liftIO = RandT . liftIO
+instance MonadFix m => MonadFix (RandT g m) where
+    mfix = RandT . mfix . (unRandT .)
 
 instance (Functor m,Monad m) => Applicative (RandT g m) where
   pure = return
   (<*>) = ap
 
-liftState :: (MonadState s m) => (s -> (a,s)) -> m a
+liftState :: (MonadState m) => (StateType m -> (a, StateType m)) -> m a
 liftState t = do v <- get
                  let (x, v') = t v
                  put v'
@@ -74,7 +88,8 @@ instance (Monad m, RandomGen g) => MonadRandom (RandT g m) where
     getRandomRs (x,y) = RandT . liftState $
                             first (randomRs (x,y)) . split
 
-instance (Monad m, RandomGen g) => MonadSplit g (RandT g m) where
+instance (Monad m, RandomGen g) => MonadSplit (RandT g m) where
+    type SplitType (RandT g m) = g
     getSplit = RandT . liftState $ split
 
 -- | Evaluate a RandT computation using the generator @g@.  Note that the
@@ -89,8 +104,31 @@ runRandT  :: (Monad m, RandomGen g) => RandT g m a -> g -> m (a, g)
 runRandT (RandT x) g = runStateT x g
 
 -- | A basic random monad.
-newtype Rand g a = Rand (RandT g Identity a)
-    deriving (Functor, Applicative, Monad, MonadRandom, MonadSplit g, MonadFix)
+newtype Rand g a = Rand{
+    unRand :: (RandT g Identity a)
+}
+
+-- More handwritten instances.
+instance Functor (Rand g) where
+    fmap f = Rand . fmap f . unRand
+instance Applicative (Rand g) where
+    pure = Rand . pure
+    (<*>) fab fa = Rand $ unRand fab <*> unRand fa
+instance Monad (Rand g) where
+    (>>=) ma f = Rand $ unRand ma >>= unRand . f
+    (>>) ma mb = Rand $ unRand ma >> unRand mb
+    return = Rand . return
+    fail = Rand . fail
+instance (RandomGen g) => MonadRandom (Rand g) where
+    getRandom = Rand getRandom
+    getRandoms = Rand getRandoms
+    getRandomR = Rand . getRandomR
+    getRandomRs = Rand . getRandomRs
+instance (RandomGen g) => MonadSplit (Rand g) where
+    type SplitType (Rand g) = g
+    getSplit = Rand getSplit
+instance MonadFix (Rand g) where
+    mfix = Rand . mfix . (unRand .)
 
 -- | Evaluate a random computation using the generator @g@.  Note that the
 -- generator @g@ is not returned, so there's no way to recover the
@@ -144,27 +182,34 @@ instance (Error e, MonadRandom m) => MonadRandom (ErrorT e m) where
     getRandoms = lift getRandoms
     getRandomRs = lift . getRandomRs
 
-instance (MonadSplit g m) => MonadSplit g (StateT s m) where
+instance (MonadSplit m) => MonadSplit (StateT s m) where
+    type SplitType (StateT s m) = SplitType m
     getSplit = lift getSplit
 
-instance (MonadSplit g m, Monoid w) => MonadSplit g (WriterT w m) where
+instance (MonadSplit m, Monoid w) => MonadSplit (WriterT w m) where
+    type SplitType (WriterT w m) = SplitType m
     getSplit = lift getSplit
 
-instance (MonadSplit g m) => MonadSplit g (ReaderT r m) where
+instance (MonadSplit m) => MonadSplit (ReaderT r m) where
+    type SplitType (ReaderT r m) = SplitType m
     getSplit = lift getSplit
 
-instance (Error e, MonadSplit g m) => MonadSplit g (ErrorT e m) where
+instance (Error e, MonadSplit m) => MonadSplit (ErrorT e m) where
+    type SplitType (ErrorT e m) = SplitType m
     getSplit = lift getSplit
 
-instance (MonadState s m, RandomGen g) => MonadState s (RandT g m) where
+instance (MonadState m, RandomGen g) => MonadState (RandT g m) where
+    type StateType (RandT g m) = StateType m
     get = lift get
     put = lift . put
 
-instance (MonadReader r m, RandomGen g) => MonadReader r (RandT g m) where
+instance (MonadReader m, RandomGen g) => MonadReader (RandT g m) where
+    type EnvType (RandT g m) = EnvType m
     ask = lift ask
     local f (RandT m) = RandT $ local f m
 
-instance (MonadWriter w m, RandomGen g, Monoid w) => MonadWriter w (RandT g m) where
+instance (MonadWriter m, RandomGen g) => MonadWriter (RandT g m) where
+    type WriterType (RandT g m) = WriterType m
     tell = lift . tell
     listen (RandT m) = RandT $ listen m
     pass (RandT m) = RandT $ pass m
@@ -175,7 +220,8 @@ instance MonadRandom IO where
     getRandoms = fmap randoms newStdGen
     getRandomRs b = fmap (randomRs b) newStdGen
 
-instance MonadSplit StdGen IO where
+instance MonadSplit IO where
+    type SplitType IO = StdGen
     getSplit = newStdGen
 
 {- $RandExample

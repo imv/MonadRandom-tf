@@ -1,7 +1,7 @@
-{-# LANGUAGE MultiParamTypeClasses, UndecidableInstances, FunctionalDependencies #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- |
-Copyright    : 2006-2007 Cale Gibbard, Russell O'Connor, Dan Doel, Remi Turk, Eric Kidd.
+Copyright    : 2006-2007 Cale Gibbard, Russell O'Connor, Dan Doel, Remi Turk, Eric Kidd, Michael Ivko.
 License      : OtherLicense
 Stability    : experimental
 Portability  : non-portable (multi-parameter type classes, undecidable instances)
@@ -22,6 +22,7 @@ module Control.Monad.Random.Class (
     getRandoms,
     getRandomRs,
     MonadSplit,
+    SplitType,
     getSplit
     ) where
 
@@ -45,6 +46,7 @@ class (Monad m) => MonadRandom m where
 -- | An interface to monads with splittable state (as most random number generation monads will have).
 -- The intention is that the 'getSplit' action splits the state, returning one half of the result, and
 -- setting the new state to the other.
-class (Monad m) => MonadSplit s m | m -> s where
-    getSplit :: m s
+class (Monad m) => MonadSplit m where
+    type SplitType m :: *
+    getSplit :: m (SplitType m)
 
